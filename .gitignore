@@ -1,0 +1,9 @@
+# Environment files
+/app/.env
+
+# Byte-compiled / optimized / DLL files
+app/__pycache__/
+
+# IDEA project files
+.idea/
+
