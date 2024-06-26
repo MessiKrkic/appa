@@ -117,6 +117,10 @@ async def generate_citation(prompt: Prompt, key: str = Depends(api_key_header_sc
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/healthcheck")
+async def health_check():
+    return {"status": "ok"}
+
 # For debugging purposes
 # if __name__ == "__main__":
 #     uvicorn.run(app, host="0.0.0.0", port=8000)
