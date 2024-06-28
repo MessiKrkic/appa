@@ -1,9 +1,11 @@
 import os
+from datetime import datetime, timedelta
+import logging
 
+from jose import jwt
 import openai
-from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.security import APIKeyHeader
+from fastapi import FastAPI, HTTPException, Depends, Request, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -64,12 +66,29 @@ Lastly for journal articles specifically, you must include the date the article 
 Only return the complete reference and nothing else based on the user's prompt.
 """
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai.api_key = OPENAI_API_KEY
-API_KEY = os.getenv('API_KEY')
-api_key_header_scheme = APIKeyHeader(name="x-api-key")
+SECRET_KEY = os.getenv("SECRET_KEY")
 
 app = FastAPI()
+security = HTTPBearer()
+
+def decode_token(token: str):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)):
+    token = credentials.credentials
+    payload = decode_token(token)
+    return payload["sub"]
 
 
 class CustomCORSMiddleware(BaseHTTPMiddleware):
@@ -97,9 +116,7 @@ app.add_middleware(CustomCORSMiddleware)
 
 
 @app.post("/generate-citation")
-async def generate_citation(prompt: Prompt, key: str = Depends(api_key_header_scheme)):
-    if not key in API_KEY:
-        raise HTTPException(status_code=401, detail="Not authorized")
+async def generate_citation(prompt: Prompt, current_user: str = Depends(get_current_user)):
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=500, detail="OpenAI API key is not configured.")
 
@@ -116,6 +133,21 @@ async def generate_citation(prompt: Prompt, key: str = Depends(api_key_header_sc
         return {"response": response.choices[0].message['content']}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/get-token")
+async def get_token(request: Request):
+    data = await request.json()
+    unique_id = data.get("uniqueId")
+    if not unique_id:
+        raise HTTPException(status_code=400, detail="Missing uniqueId")
+
+    token = jwt.encode({
+        "sub": unique_id,
+        "exp": datetime.utcnow() + timedelta(days=30)
+    }, SECRET_KEY, algorithm="HS256")
+
+    return {"token": token}
 
 @app.get("/healthcheck")
 async def health_check():
